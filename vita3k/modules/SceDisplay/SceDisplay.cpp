@@ -19,10 +19,14 @@
 
 #include <display/functions.h>
 #include <display/state.h>
+#include <gxm/state.h>
 #include <io/state.h>
 #include <kernel/state.h>
 #include <packages/functions.h>
+#include <renderer/functions.h>
 #include <renderer/state.h>
+#include <renderer/types.h>
+#include <util/log.h>
 #include <util/types.h>
 
 #include <util/tracy.h>
@@ -155,6 +159,39 @@ EXPORT(SceInt32, _sceDisplaySetFrameBuf, const SceDisplayFrameBuf *pFrameBuf, Sc
 
     emuenv.display.last_setframe_vblank_count = emuenv.display.vblank_count.load();
     emuenv.frame_count++;
+
+    // FIX (SunFlowers leak): games that present through sceDisplaySetFrameBuf never go through the
+    // GXM display queue, so the NewFrame command is never sent, and vulkan::new_frame -- the only
+    // place that advances frame_timestamp and recycles command buffers, fences, command pools and
+    // descriptor sets -- never runs. Vulkan allocations then ratchet every frame until the driver
+    // gives up. Drive the same per-frame reset from this presentation path as well, keeping both
+    // presentation paths in sync.
+    if (emuenv.renderer && emuenv.renderer->current_backend == renderer::Backend::Vulkan) {
+        static uint32_t last_sent_base = 0;
+        if (last_sent_base != info.base) {
+            last_sent_base = info.base;
+
+            renderer::Context *active_renderer_context = nullptr;
+            if (emuenv.gxm.last_immediate_context) {
+                for (const auto &entry : emuenv.gxm.immediate_contexts) {
+                    if (entry.second == emuenv.gxm.last_immediate_context) {
+                        active_renderer_context = entry.first->renderer.get();
+                        break;
+                    }
+                }
+            }
+            if (!active_renderer_context && !emuenv.gxm.immediate_contexts.empty())
+                // no "last immediate" context: fall back to any live immediate context
+                active_renderer_context = emuenv.gxm.immediate_contexts.begin()->first->renderer.get();
+
+            renderer::send_single_command(*emuenv.renderer, nullptr, renderer::CommandOpcode::NewFrame, false, new DisplayFrameInfo(info), &emuenv.display, active_renderer_context);
+
+            // LEAKWATCH: is the setFrameBuf-driven reset firing, and with a context?
+            static uint64_t setbuf_newframe_count = 0;
+            if (++setbuf_newframe_count % 30 == 1)
+                LOG_INFO("LEAKWATCH setbuf-newframe #{} has_ctx {}", setbuf_newframe_count, active_renderer_context != nullptr);
+        }
+    }
 
 #ifdef TRACY_ENABLE
     FrameMarkNamed("SCE frame buffer"); // Tracy - Secondary frame end mark for the emulated frame buffer
