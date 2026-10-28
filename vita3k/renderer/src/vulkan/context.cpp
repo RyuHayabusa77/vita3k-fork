@@ -309,7 +309,7 @@ void VKContext::start_recording(bool first_in_scene) {
 }
 
 // we only need one descriptor per scene, so this does not need to be too big
-static constexpr uint32_t DESCRIPTOR_PACK_SIZE = 16;
+static constexpr uint32_t DESCRIPTOR_PACK_SIZE = 128;
 
 static vk::DescriptorSet retrieve_color_descriptor(VKState &state, FrameDescriptor &frame_descriptor) {
     if (frame_descriptor.descriptors_idx < frame_descriptor.sets.size())

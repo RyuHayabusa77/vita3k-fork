@@ -118,7 +118,7 @@ void restride_stream(const uint8_t *&stream, uint32_t &size, uint32_t stride) {
 #endif
 
 // when needed, how many descriptor of the given size we allocate for each frame at once
-static constexpr uint32_t DESCRIPTOR_PACK_SIZE = 64;
+static constexpr uint32_t DESCRIPTOR_PACK_SIZE = 256;
 
 static vk::DescriptorSet retrieve_descriptor(VKContext &context, bool is_vertex, uint16_t textures_count) {
     if (textures_count == 0)

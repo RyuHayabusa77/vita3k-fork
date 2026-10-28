@@ -208,7 +208,7 @@ VKRenderTarget::VKRenderTarget(VKState &state, const SceGxmRenderTargetParams &p
     depthstencil.transition_to_discard(cmd_buffer, vkutil::ImageLayout::DepthStencilAttachment, vkutil::ds_subresource_range);
     vkutil::end_single_time_command(state.device, state.general_queue, state.general_command_pool, cmd_buffer);
 
-    constexpr uint16_t SCE_GXM_MAX_SCENES_PER_RENDERTARGET = 8;
+    constexpr uint16_t SCE_GXM_MAX_SCENES_PER_RENDERTARGET = 64;
     // hopefully this will always be enough
     const uint16_t samples_per_frame = std::min<uint16_t>(params.scenesPerFrame + 2, SCE_GXM_MAX_SCENES_PER_RENDERTARGET);
 
