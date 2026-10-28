@@ -259,6 +259,9 @@ void VKContext::start_recording(bool first_in_scene) {
     // safety check
     if (render_target->cmd_buffer_idx == render_target->cmd_buffers[state.current_frame_idx].size()) {
         LOG_WARN_ONCE("Render Target is using more scenes per frame than what was planned!");
+        // LEAKWATCH: log growth of the scene cmd buffer / fence ratchet
+        if (render_target->cmd_buffers[state.current_frame_idx].size() % 64 == 0)
+            LOG_INFO("LEAKWATCH scene-overflow frame {} scene_count {} rt_fences {}", frame_timestamp, render_target->cmd_buffers[state.current_frame_idx].size() + 1, render_target->fences.size());
 
         // add additional cmd buffers, fences and semaphores
         vk::CommandBufferAllocateInfo cmd_buffer_info{
@@ -334,6 +337,8 @@ static vk::DescriptorSet retrieve_color_descriptor(VKState &state, FrameDescript
 
     vk::DescriptorPool descriptor_pool = state.device.createDescriptorPool(descriptor_pool_info);
     state.frame_descriptor_pools.push_back(descriptor_pool);
+    // LEAKWATCH: color descriptor pool ratchet growth
+    LOG_INFO("LEAKWATCH color-pool total_pools {} color_sets_frame0 {}", state.frame_descriptor_pools.size(), state.frames[0].color_descriptor.sets.size() + DESCRIPTOR_PACK_SIZE);
 
     // allocate all the descriptor sets
     const vk::DescriptorSetLayout set_layout = state.pipeline_cache.attachments_layout;
@@ -772,6 +777,24 @@ void new_frame(VKContext &context) {
         frame.frag_descriptors[i].descriptors_idx = 0;
     }
     frame.color_descriptor.descriptors_idx = 0;
+
+    // LEAKWATCH instrumentation (SunFlowers leak hunt branch)
+    if (context.frame_timestamp % 60 == 0) {
+        size_t vert_sets = 0, frag_sets = 0;
+        for (int i = 0; i < 16; i++) {
+            vert_sets += frame.vert_descriptors[i].sets.size();
+            frag_sets += frame.frag_descriptors[i].sets.size();
+        }
+        LOG_INFO("LEAKWATCH frame {} desc_pools {} vert_sets {} frag_sets {} color_sets {} rt_fences {} rt_cmdbufs {} rt_precmdbufs {} mapped {} trapped {}",
+            context.frame_timestamp,
+            context.state.frame_descriptor_pools.size(),
+            vert_sets, frag_sets, frame.color_descriptor.sets.size(),
+            context.render_target ? context.render_target->fences.size() : 0u,
+            context.render_target ? context.render_target->cmd_buffers[0].size() : 0u,
+            context.render_target ? context.render_target->pre_cmd_buffers[0].size() : 0u,
+            context.state.mapped_memories.size(),
+            context.state.buffer_trapping.trapped_buffers.size());
+    }
 
     // deferred destruction of the objects
     frame.destroy_queue.destroy_objects();
