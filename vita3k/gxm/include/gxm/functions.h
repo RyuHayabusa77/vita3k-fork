@@ -25,6 +25,7 @@
 
 struct EmuEnvState;
 struct GxmState;
+struct DisplayFrameInfo;
 
 namespace gxm {
 // Color.
@@ -59,6 +60,9 @@ void destroy_all_contexts(EmuEnvState &emuenv, bool force_backend_destroy);
 void destroy_all_render_targets(EmuEnvState &emuenv, bool force_backend_destroy);
 void shutdown(EmuEnvState &emuenv);
 void invalidate_sync_objects(GxmState &gxm);
+
+// Send the renderer NewFrame command for games that present through sceDisplaySetFrameBuf
+void send_display_new_frame(EmuEnvState &emuenv, const DisplayFrameInfo &frame_info);
 } // namespace gxm
 
 namespace gxp {

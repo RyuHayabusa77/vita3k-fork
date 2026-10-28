@@ -2315,6 +2315,43 @@ EXPORT(int, sceGxmDisplayQueueAddEntry, Ptr<SceGxmSyncObject> oldBuffer, Ptr<Sce
     return 0;
 }
 
+namespace gxm {
+// FIX (SunFlowers leak): games that present through sceDisplaySetFrameBuf never go through the GXM
+// display queue, so the NewFrame command is never sent, and vulkan::new_frame -- the only place
+// that advances frame_timestamp and recycles command buffers, fences, command pools and descriptor
+// sets -- never runs. Vulkan allocations then ratchet every frame until the driver gives up.
+// Drive the same per-frame reset from the frame buffer presentation path as well.
+void send_display_new_frame(EmuEnvState &emuenv, const DisplayFrameInfo &frame_info) {
+    if (!emuenv.renderer || emuenv.renderer->current_backend != renderer::Backend::Vulkan)
+        return;
+
+    static Address last_sent_base = 0;
+    if (last_sent_base == frame_info.base.address())
+        // same frame buffer presented twice in a row, do not advance the frame state twice
+        return;
+    last_sent_base = frame_info.base.address();
+
+    renderer::Context *active_renderer_context = nullptr;
+    if (emuenv.gxm.last_immediate_context) {
+        const auto immediate_context = std::ranges::find_if(emuenv.gxm.immediate_contexts, [&](const auto &entry) {
+            return entry.second == emuenv.gxm.last_immediate_context;
+        });
+        if (immediate_context != emuenv.gxm.immediate_contexts.end())
+            active_renderer_context = immediate_context->first->renderer.get();
+    }
+    if (!active_renderer_context && !emuenv.gxm.immediate_contexts.empty())
+        // no "last immediate" context: fall back to any live immediate context
+        active_renderer_context = emuenv.gxm.immediate_contexts.begin()->first->renderer.get();
+
+    renderer::send_single_command(*emuenv.renderer, nullptr, renderer::CommandOpcode::NewFrame, false, new DisplayFrameInfo(frame_info), &emuenv.display, active_renderer_context);
+
+    // LEAKWATCH: is the setFrameBuf-driven reset firing, and with a context?
+    static uint64_t setbuf_newframe_count = 0;
+    if (++setbuf_newframe_count % 30 == 1)
+        LOG_INFO("LEAKWATCH setbuf-newframe #{} has_ctx {}", setbuf_newframe_count, active_renderer_context != nullptr);
+}
+} // namespace gxm
+
 EXPORT(int, sceGxmDisplayQueueFinish) {
     TRACY_FUNC(sceGxmDisplayQueueFinish);
     emuenv.gxm.display_queue.wait_empty();
