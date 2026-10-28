@@ -906,6 +906,12 @@ static void display_entry_thread(EmuEnvState &emuenv) {
         if (!display_callback)
             break;
 
+        // LEAKWATCH: did the display queue thread actually process this entry?
+        static uint64_t leakwatch_dq_count = 0;
+        ++leakwatch_dq_count;
+        if (leakwatch_dq_count % 30 == 1)
+            LOG_INFO("LEAKWATCH display-queue iter #{}", leakwatch_dq_count);
+
         SceGxmSyncObject *old_sync = display_callback->old_sync.get(emuenv.mem);
         SceGxmSyncObject *new_sync = display_callback->new_sync.get(emuenv.mem);
 
@@ -2022,6 +2028,7 @@ EXPORT(int, sceGxmCreateContext, const SceGxmContextParams *params, Ptr<SceGxmCo
     emuenv.gxm.immediate_contexts.emplace(ctx, context->address());
     if (emuenv.gxm.last_immediate_context == 0)
         emuenv.gxm.last_immediate_context = context->address();
+    LOG_INFO("LEAKWATCH immediate gxm context created at address 0x{:X}", context->address());
     return 0;
 }
 
@@ -2243,6 +2250,12 @@ EXPORT(int, sceGxmDisplayQueueAddEntry, Ptr<SceGxmSyncObject> oldBuffer, Ptr<Sce
     if (!oldBuffer || !newBuffer)
         return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);
 
+    // LEAKWATCH: is the game actually submitting display flips at all?
+    static uint64_t leakwatch_addentry_count = 0;
+    ++leakwatch_addentry_count;
+    if (leakwatch_addentry_count % 30 == 1)
+        LOG_INFO("LEAKWATCH addEntry #{} last_immediate 0x{:X}", leakwatch_addentry_count, emuenv.gxm.last_immediate_context);
+
     const Address address = alloc(emuenv.mem, emuenv.gxm.params.displayQueueCallbackDataSize, __FUNCTION__);
     const Ptr<void> ptr(address);
     memcpy(ptr.get(emuenv.mem), callbackData.get(emuenv.mem), emuenv.gxm.params.displayQueueCallbackDataSize);
@@ -2279,6 +2292,19 @@ EXPORT(int, sceGxmDisplayQueueAddEntry, Ptr<SceGxmSyncObject> oldBuffer, Ptr<Sce
         if (immediate_context != emuenv.gxm.immediate_contexts.end())
             active_renderer_context = immediate_context->first->renderer.get();
     }
+    if (!active_renderer_context && !emuenv.gxm.immediate_contexts.empty()) {
+        // FIX (SunFlowers leak): the game flipped without any immediate context being marked as the
+        // "last" one, so the NewFrame command never carried a renderer context, the Vulkan per-frame
+        // reset (new_frame) never ran and descriptor sets/cmd buffers/fences ratcheted forever.
+        // Fall back to any live immediate context so the frame state is actually reset.
+        active_renderer_context = emuenv.gxm.immediate_contexts.begin()->first->renderer.get();
+    }
+
+    // LEAKWATCH: does the NewFrame command carry a renderer context?
+    static uint64_t leakwatch_send_count = 0;
+    ++leakwatch_send_count;
+    if (leakwatch_send_count % 30 == 1)
+        LOG_INFO("LEAKWATCH addEntry-send #{} ctx_found {} predicted {}", leakwatch_send_count, active_renderer_context != nullptr, frame != nullptr);
 
     renderer::send_single_command(*emuenv.renderer, nullptr, renderer::CommandOpcode::NewFrame, false, frame, &emuenv.display, active_renderer_context);
 

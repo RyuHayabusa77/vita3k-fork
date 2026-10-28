@@ -30,6 +30,7 @@
 #include <renderer/vulkan/types.h>
 
 #include <renderer/functions.h>
+#include <util/log.h>
 #include <util/tracy.h>
 
 namespace renderer {
@@ -94,6 +95,8 @@ COMMAND(new_frame) {
     DisplayFrameInfo *next_frame = helper.pop<DisplayFrameInfo *>();
     DisplayState *display = helper.pop<DisplayState *>();
 
+    const bool leakwatch_has_frame = next_frame != nullptr;
+
     if (next_frame) {
         // set the predicted frame as the next one to render
         std::lock_guard<std::mutex> guard(display->display_info_mutex);
@@ -105,6 +108,13 @@ COMMAND(new_frame) {
 
     if (renderer.current_backend == Backend::Vulkan) {
         renderer::Context *active_context = helper.pop<renderer::Context *>();
+
+        // LEAKWATCH: is the per-frame Vulkan reset actually reached?
+        static uint64_t leakwatch_newframe_count = 0;
+        ++leakwatch_newframe_count;
+        if (leakwatch_newframe_count % 30 == 1)
+            LOG_INFO("LEAKWATCH newframe-cmd #{} has_frame {} has_ctx {}", leakwatch_newframe_count, leakwatch_has_frame, active_context != nullptr);
+
         if (active_context) {
             vulkan::new_frame(*reinterpret_cast<vulkan::VKContext *>(active_context));
         }
