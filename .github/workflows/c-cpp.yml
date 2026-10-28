@@ -18,6 +18,8 @@ env:
 jobs:
   desktop-build:
     name: Desktop (${{ matrix.platform }})
+    # fork: Android-only builds
+    if: false
     runs-on: ${{ matrix.runs_on }}
 
     strategy:
@@ -211,6 +213,8 @@ jobs:
   # The desktop build of Linux x64 on its own, so the autotests start as soon as it is done
   linux-x64-build:
     name: Desktop (${{ matrix.platform }})
+    # fork: Android-only builds
+    if: false
     runs-on: ${{ matrix.runs_on }}
 
     strategy:
@@ -227,6 +231,8 @@ jobs:
 
   autotests:
     name: VitaAutotests (linux-x64)
+    # fork: Android-only builds
+    if: false
     # Its own job, so a runner lost during the tests doesn't fail the build, and a rerun of the tests
     # doesn't build again
     needs: linux-x64-build
